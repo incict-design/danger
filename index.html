@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>水戸市不審者情報共有マップ</title>
+    <title>Cloud Firestore 水戸市不審者情報共有マップ</title>
     <style>
         /* 地図のスタイル */
         #map {
@@ -13,12 +13,12 @@
         .container {
             max-width: 800px;
             margin: 20px auto;
-           
+            
             font-family: Arial, sans-serif;
         }
         /* フォームのスタイル */
         #report-form {
-            padding: 10px;
+            padding: 5px;
             border: 1px solid #ccc;
             border-radius: 5px;
             margin-bottom: 20px;
@@ -27,10 +27,11 @@
 </head>
 <body>
     <div class="container">
-        
+  
         
         <div id="report-form">
            
+            
             <label for="description">状況の詳細:</label><br>
             <textarea id="description" rows="3" cols="50"></textarea><br><br>
             
@@ -61,6 +62,7 @@
         const db = firebase.firestore(); // Firestoreを参照
         const markers = {}; // マーカーをドキュメントIDで管理するオブジェクト
         const reportsData = {}; 
+        let currentInfoWindow = null; // 現在開いている情報ウィンドウを管理
 
         // ----------------------------------------------------
         // 2. Google Maps APIキーの設定と読み込み
@@ -76,7 +78,14 @@
             
             map = new google.maps.Map(document.getElementById("map"), {
                 center: initialPos,
-                zoom: 16,
+                zoom: 16, 
+            });
+
+            // 地図をクリックしたときに情報ウィンドウを閉じる
+            map.addListener("click", () => {
+                if (currentInfoWindow) {
+                    currentInfoWindow.close();
+                }
             });
 
             // 地図クリックイベントのリスナー設定 (投稿位置の選択)
@@ -84,7 +93,6 @@
                 const lat = mapsMouseEvent.latLng.lat();
                 const lng = mapsMouseEvent.latLng.lng();
                 
-                // ★修正: クリックされた座標をselectedLocationに直接保存する
                 selectedLocation = { lat: lat, lng: lng };
 
                 // 地図をクリックした際は、詳細入力欄をクリアする
@@ -102,10 +110,71 @@
                     title: "投稿位置",
                     icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
                 });
+                
+                // 新規投稿ピンのクリックリスナー
+                markers.temp.addListener("click", () => {
+                    // 投稿フォームの現在値を取得
+                    const currentDescription = document.getElementById('description').value;
+
+                    const tempInfoWindowContent = `
+                        <h3>新規投稿位置 (未保存)</h3>
+                        <p><strong>状況:</strong> ${currentDescription || '未入力'}</p>
+                        <p>詳細を入力して投稿ボタンを押してください。</p>
+                    `;
+                    
+                    const tempInfoWindow = new google.maps.InfoWindow({
+                        content: tempInfoWindowContent
+                    });
+
+                    // 他のウィンドウを閉じる
+                    if (currentInfoWindow) {
+                        currentInfoWindow.close();
+                    }
+                    
+                    tempInfoWindow.open(map, markers.temp);
+                    currentInfoWindow = tempInfoWindow;
+                });
             });
 
             // データベースから既存のピンをリアルタイムで読み込む
             listenForReports();
+        }
+
+        /**
+         * マーカーのクリック時に情報ウィンドウを表示するヘルパー関数
+         * @param {google.maps.Marker} marker - 対象のマーカー
+         * @param {Object} data - 表示するデータ
+         */
+        function attachInfoWindow(marker, data) {
+            const infoWindowContent = `
+                <h3>不審者情報</h3>
+                <p><strong>状況:</strong> ${data.description}</p>
+                <p><strong>日時:</strong> ${new Date(data.timestamp.toDate()).toLocaleString()}</p>
+            `;
+            const infoWindow = new google.maps.InfoWindow({
+                content: infoWindowContent
+            });
+
+            marker.addListener("click", () => {
+                // 以前に開いた情報ウィンドウがあれば閉じる
+                if (currentInfoWindow) {
+                    currentInfoWindow.close();
+                }
+
+                // 新しい情報ウィンドウを開く
+                infoWindow.open(map, marker);
+                currentInfoWindow = infoWindow; // 現在開いているウィンドウを更新
+                
+                // フォームに情報を表示する処理は行わない
+                document.getElementById('description').value = ''; 
+                
+                // 一時投稿マーカーを削除し、投稿位置をリセット
+                if (markers.temp) {
+                    markers.temp.setMap(null);
+                    delete markers.temp;
+                }
+                selectedLocation = null; 
+            });
         }
 
         /**
@@ -129,25 +198,8 @@
                             icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
                         });
                         
-                        const infoWindow = new google.maps.InfoWindow({
-                            content: `<h3>不審者情報</h3><p>${data.description}</p><p>日時: ${new Date(data.timestamp.toDate()).toLocaleString()}</p>`
-                        });
-
-                        reportMarker.addListener("click", () => {
-                            // 1. 情報ウィンドウを表示
-                            infoWindow.open(map, reportMarker);
-                            
-                            // 2. フォームに情報を表示
-                            // ★修正: 緯度経度の入力欄がないため、descriptionのみ表示する
-                            document.getElementById('description').value = data.description; 
-                            
-                            // 3. 一時投稿マーカーを削除し、投稿位置をリセット
-                            if (markers.temp) {
-                                markers.temp.setMap(null);
-                                delete markers.temp;
-                            }
-                            selectedLocation = null; // 既存ピンのクリックは新規投稿ではないためリセット
-                        });
+                        // 情報ウィンドウのロジックを分離した関数に置き換え
+                        attachInfoWindow(reportMarker, data);
 
                         markers[docId] = reportMarker;
 
@@ -169,7 +221,6 @@
         function submitReport() {
             const description = document.getElementById('description').value;
             
-            // ★修正: selectedLocationが設定されていない（地図がクリックされていない）場合は警告
             if (!selectedLocation) {
                 alert("地図をクリックしてピンの位置を選択してください。");
                 return;
@@ -188,9 +239,11 @@
 
             db.collection("reports").add(reportData)
                 .then(() => {
-                    alert("情報を投稿しました。");
+                    // ★修正箇所: 投稿成功後、アラートを表示し、ページをリロードする
+                    alert("情報を投稿しました。地図を再読み込みします。");
+                    location.reload(); 
                     
-                    // フォームと一時マーカーをリセット
+                    // 以下のリセット処理はリロードによって実行されるため、実質不要ですが、念のため残しておきます。
                     document.getElementById('description').value = '';
                     if (markers.temp) {
                         markers.temp.setMap(null);

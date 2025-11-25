@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>水戸市不審者情報共有マップ</title>
+    <style>
+        /* 地図のスタイル */
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 15px;
+            font-family: Arial, sans-serif;
+        }
+        /* フォームのスタイル */
+        #report-form {
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>水戸市不審者情報共有マップ</h2>
+        
+        <div id="report-form">
+           
+            <label for="description">状況の詳細:</label><br>
+            <textarea id="description" rows="3" cols="50"></textarea><br><br>
+            
+            <button onclick="submitReport()">投稿する</button>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script> 
+
+    <script>
+        // ----------------------------------------------------
+        // 🚨 1. Firebase設定: ここをあなたの情報に置き換えてください
+        // ----------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyB_ft6Nsv511VwGh73Peljdkhvc4cT1PK8",
+            authDomain: "danger-e17d4.firebaseapp.com",
+            projectId: "danger-e17d4",
+            storageBucket: "danger-e17d4.firebasestorage.app",
+            messagingSenderId: "671800740218",
+            appId: "1:671800740218:web:a95e9750fbf79905ea2ec3"
+        };
+
+        // Firebaseの初期化とFirestoreの参照取得
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore(); // Firestoreを参照
+        const markers = {}; // マーカーをドキュメントIDで管理するオブジェクト
+        const reportsData = {}; 
+
+        // ----------------------------------------------------
+        // 2. Google Maps APIキーの設定と読み込み
+        // ----------------------------------------------------
+        let map;
+        let selectedLocation = null; // 選択された投稿位置の座標を保持
+
+        /**
+         * Google Mapを初期化する関数
+         */
+        function initMap() {
+            const initialPos = { lat: 36.3658, lng: 140.4764 }; // 例: 水戸市
+            
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: initialPos,
+                zoom: 12,
+            });
+
+            // 地図クリックイベントのリスナー設定 (投稿位置の選択)
+            map.addListener("click", (mapsMouseEvent) => {
+                const lat = mapsMouseEvent.latLng.lat();
+                const lng = mapsMouseEvent.latLng.lng();
+                
+                // ★修正: クリックされた座標をselectedLocationに直接保存する
+                selectedLocation = { lat: lat, lng: lng };
+
+                // 地図をクリックした際は、詳細入力欄をクリアする
+                document.getElementById('description').value = ''; 
+                
+                // 以前の選択マーカーを削除
+                if (markers.temp) {
+                    markers.temp.setMap(null);
+                }
+
+                // 新しい選択マーカー (temp) を追加
+                markers.temp = new google.maps.Marker({
+                    position: selectedLocation,
+                    map: map,
+                    title: "投稿位置",
+                    icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+                });
+            });
+
+            // データベースから既存のピンをリアルタイムで読み込む
+            listenForReports();
+        }
+
+        /**
+         * Firestoreから情報をリアルタイムで読み込む関数
+         */
+        function listenForReports() {
+            db.collection("reports").onSnapshot((snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const docId = change.doc.id;
+                    const data = change.doc.data();
+                    
+                    reportsData[docId] = data; 
+
+                    if (change.type === "added") {
+                        if (docId === 'temp') return; 
+                        
+                        const reportMarker = new google.maps.Marker({
+                            position: new google.maps.LatLng(data.latitude, data.longitude),
+                            map: map,
+                            title: data.description,
+                            icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                        });
+                        
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `<h3>不審者情報</h3><p>${data.description}</p><p>日時: ${new Date(data.timestamp.toDate()).toLocaleString()}</p>`
+                        });
+
+                        reportMarker.addListener("click", () => {
+                            // 1. 情報ウィンドウを表示
+                            infoWindow.open(map, reportMarker);
+                            
+                            // 2. フォームに情報を表示
+                            // ★修正: 緯度経度の入力欄がないため、descriptionのみ表示する
+                            document.getElementById('description').value = data.description; 
+                            
+                            // 3. 一時投稿マーカーを削除し、投稿位置をリセット
+                            if (markers.temp) {
+                                markers.temp.setMap(null);
+                                delete markers.temp;
+                            }
+                            selectedLocation = null; // 既存ピンのクリックは新規投稿ではないためリセット
+                        });
+
+                        markers[docId] = reportMarker;
+
+                    } else if (change.type === "removed") {
+                        if (markers[docId]) {
+                            markers[docId].setMap(null);
+                            delete markers[docId];
+                            delete reportsData[docId]; 
+                        }
+                    } 
+                });
+            });
+        }
+
+
+        /**
+         * 投稿フォームのデータをFirestoreに送信する関数
+         */
+        function submitReport() {
+            const description = document.getElementById('description').value;
+            
+            // ★修正: selectedLocationが設定されていない（地図がクリックされていない）場合は警告
+            if (!selectedLocation) {
+                alert("地図をクリックしてピンの位置を選択してください。");
+                return;
+            }
+            if (!description.trim()) {
+                alert("状況の詳細を入力してください。");
+                return;
+            }
+
+            const reportData = {
+                latitude: selectedLocation.lat,
+                longitude: selectedLocation.lng,
+                description: description,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            db.collection("reports").add(reportData)
+                .then(() => {
+                    alert("情報を投稿しました。");
+                    
+                    // フォームと一時マーカーをリセット
+                    document.getElementById('description').value = '';
+                    if (markers.temp) {
+                        markers.temp.setMap(null);
+                        delete markers.temp;
+                    }
+                    selectedLocation = null;
+                })
+                .catch((error) => {
+                    console.error("投稿エラー: ", error);
+                    alert("投稿中にエラーが発生しました。");
+                });
+        }
+    </script>
+
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC3WivvfQ9Y-qkXpjXwWXGGEXGKDOPhvMw&callback=initMap"></script>
+</body>
+</html>

@@ -3,17 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloud Firestore 水戸市不審者情報共有マップ</title>
+    <title>Cloud Firestore 不審者情報共有マップ</title>
     <style>
         /* 地図のスタイル */
         #map {
             height: 600px;
             width: 100%;
+            /* ★修正箇所 1: オーバーレイ防止CSSの追加 */
+            -webkit-user-select: none; /* iOS Safari */
+            -moz-user-select: none;    /* Firefox */
+            -ms-user-select: none;     /* IE/Edge */
+            user-select: none;         /* 標準 */
+            -webkit-tap-highlight-color: transparent; /* モバイルのタップハイライトを無効化 */
         }
         .container {
             max-width: 800px;
             margin: 20px auto;
-            
+           
             font-family: Arial, sans-serif;
         }
         /* フォームのスタイル */
@@ -23,19 +29,36 @@
             border-radius: 5px;
             margin-bottom: 20px;
         }
+        /* ボタンの配置調整 */
+        .form-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: flex-end;
+        }
+        .form-actions button {
+            padding: 8px 10px;
+        }
+        #reset-pin-button {
+            background-color: #f4f4f4;
+            color: #333;
+            border: 1px solid #ccc;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-  
+       
         
         <div id="report-form">
            
             
-            <label for="description">状況の詳細:</label><br>
+            <label for="description">地図を長押し→状況の詳細:</label><br>
             <textarea id="description" rows="3" cols="50"></textarea><br><br>
             
-            <button onclick="submitReport()">投稿する</button>
+            <div class="form-actions">
+                <button id="reset-pin-button" onclick="resetTemporaryPin()">ピンをリセット</button>
+                <button onclick="submitReport()">投稿する</button>
+            </div>
         </div>
 
         <div id="map"></div>
@@ -60,25 +83,35 @@
         // Firebaseの初期化とFirestoreの参照取得
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore(); // Firestoreを参照
-        const markers = {}; // マーカーをドキュメントIDで管理するオブジェクト
+        const markers = {};
         const reportsData = {}; 
-        let currentInfoWindow = null; // 現在開いている情報ウィンドウを管理
+        let currentInfoWindow = null;
 
         // ----------------------------------------------------
         // 2. Google Maps APIキーの設定と読み込み
         // ----------------------------------------------------
         let map;
-        let selectedLocation = null; // 選択された投稿位置の座標を保持
+        let selectedLocation = null;
+        
+        // 長押し（ロングプレス）判定用の変数
+        let pressTimer;
+        const LONGPRESS_DELAY = 1000; 
 
         /**
          * Google Mapを初期化する関数
          */
         function initMap() {
-            const initialPos = { lat: 36.3658, lng: 140.4764 }; // 例: 水戸市
+            const initialPos = { lat: 36.3658, lng: 140.4764 }; // 水戸市
             
             map = new google.maps.Map(document.getElementById("map"), {
                 center: initialPos,
                 zoom: 16, 
+            });
+            
+            // ★修正箇所 2: 地図のコンテキストメニュー（右クリックメニュー）を無効化
+            map.addListener('rightclick', (e) => {
+                // デスクトップ環境で長押しが右クリックとして扱われるのを防ぐ
+                e.stop(); 
             });
 
             // 地図をクリックしたときに情報ウィンドウを閉じる
@@ -88,22 +121,39 @@
                 }
             });
 
-            // 地図クリックイベントのリスナー設定 (投稿位置の選択)
-            map.addListener("click", (mapsMouseEvent) => {
+            // マップの長押しイベントを設定
+            const mapElement = document.getElementById("map");
+            
+            // 地図要素に対して、長押しによるコンテキストメニューの表示を抑制
+            mapElement.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
+
+            // 長押し開始 (マウスダウン/タッチスタート)
+            const handlePressStart = (mapsMouseEvent) => {
+                pressTimer = setTimeout(() => {
+                    handleLongPress(mapsMouseEvent);
+                }, LONGPRESS_DELAY);
+            };
+
+            // 長押し終了 (マウスアップ/タッチエンド/移動)
+            const handlePressEnd = () => {
+                clearTimeout(pressTimer);
+            };
+
+            // 長押しが確定したときの処理
+            const handleLongPress = (mapsMouseEvent) => {
                 const lat = mapsMouseEvent.latLng.lat();
                 const lng = mapsMouseEvent.latLng.lng();
                 
                 selectedLocation = { lat: lat, lng: lng };
 
-                // 地図をクリックした際は、詳細入力欄をクリアする
                 document.getElementById('description').value = ''; 
                 
-                // 以前の選択マーカーを削除
                 if (markers.temp) {
                     markers.temp.setMap(null);
                 }
 
-                // 新しい選択マーカー (temp) を追加
                 markers.temp = new google.maps.Marker({
                     position: selectedLocation,
                     map: map,
@@ -111,22 +161,20 @@
                     icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
                 });
                 
-                // 新規投稿ピンのクリックリスナー
                 markers.temp.addListener("click", () => {
-                    // 投稿フォームの現在値を取得
                     const currentDescription = document.getElementById('description').value;
 
                     const tempInfoWindowContent = `
                         <h3>新規投稿位置 (未保存)</h3>
                         <p><strong>状況:</strong> ${currentDescription || '未入力'}</p>
                         <p>詳細を入力して投稿ボタンを押してください。</p>
+                        <p>このピンをリセットするには「ピンをリセット」ボタンを押してください。</p>
                     `;
                     
                     const tempInfoWindow = new google.maps.InfoWindow({
                         content: tempInfoWindowContent
                     });
 
-                    // 他のウィンドウを閉じる
                     if (currentInfoWindow) {
                         currentInfoWindow.close();
                     }
@@ -134,17 +182,20 @@
                     tempInfoWindow.open(map, markers.temp);
                     currentInfoWindow = tempInfoWindow;
                 });
-            });
+                
+                google.maps.event.trigger(markers.temp, 'click');
+            };
+
+            // マップイベントリスナーを設定
+            map.addListener('mousedown', handlePressStart);
+            map.addListener('mouseup', handlePressEnd);
+            map.addListener('mousemove', handlePressEnd);
 
             // データベースから既存のピンをリアルタイムで読み込む
             listenForReports();
         }
 
-        /**
-         * マーカーのクリック時に情報ウィンドウを表示するヘルパー関数
-         * @param {google.maps.Marker} marker - 対象のマーカー
-         * @param {Object} data - 表示するデータ
-         */
+        // マーカーのクリック時に情報ウィンドウを表示するヘルパー関数
         function attachInfoWindow(marker, data) {
             const infoWindowContent = `
                 <h3>不審者情報</h3>
@@ -156,30 +207,23 @@
             });
 
             marker.addListener("click", () => {
-                // 以前に開いた情報ウィンドウがあれば閉じる
                 if (currentInfoWindow) {
                     currentInfoWindow.close();
                 }
 
-                // 新しい情報ウィンドウを開く
                 infoWindow.open(map, marker);
-                currentInfoWindow = infoWindow; // 現在開いているウィンドウを更新
+                currentInfoWindow = infoWindow;
                 
-                // フォームに情報を表示する処理は行わない
                 document.getElementById('description').value = ''; 
                 
-                // 一時投稿マーカーを削除し、投稿位置をリセット
                 if (markers.temp) {
                     markers.temp.setMap(null);
-                    delete markers.temp;
                 }
                 selectedLocation = null; 
             });
         }
 
-        /**
-         * Firestoreから情報をリアルタイムで読み込む関数
-         */
+        // Firestoreから情報をリアルタイムで読み込む関数
         function listenForReports() {
             db.collection("reports").onSnapshot((snapshot) => {
                 snapshot.docChanges().forEach((change) => {
@@ -198,7 +242,6 @@
                             icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
                         });
                         
-                        // 情報ウィンドウのロジックを分離した関数に置き換え
                         attachInfoWindow(reportMarker, data);
 
                         markers[docId] = reportMarker;
@@ -214,15 +257,33 @@
             });
         }
 
+        // 一時的な投稿ピンとフォーム入力をリセットする関数
+        function resetTemporaryPin() {
+            clearTimeout(pressTimer); 
+            
+            if (markers.temp) {
+                markers.temp.setMap(null);
+                delete markers.temp;
+                selectedLocation = null;
+            }
+            
+            document.getElementById('description').value = '';
 
-        /**
-         * 投稿フォームのデータをFirestoreに送信する関数
-         */
+            if (currentInfoWindow) {
+                currentInfoWindow.close();
+                currentInfoWindow = null;
+            }
+
+            alert("投稿ピンとフォーム入力をリセットしました。");
+        }
+
+
+        // 投稿フォームのデータをFirestoreに送信する関数
         function submitReport() {
             const description = document.getElementById('description').value;
             
             if (!selectedLocation) {
-                alert("地図をクリックしてピンの位置を選択してください。");
+                alert("地図を1秒間長押ししてピンの位置を選択してください。");
                 return;
             }
             if (!description.trim()) {
@@ -239,17 +300,8 @@
 
             db.collection("reports").add(reportData)
                 .then(() => {
-                    // ★修正箇所: 投稿成功後、アラートを表示し、ページをリロードする
                     alert("情報を投稿しました。地図を再読み込みします。");
                     location.reload(); 
-                    
-                    // 以下のリセット処理はリロードによって実行されるため、実質不要ですが、念のため残しておきます。
-                    document.getElementById('description').value = '';
-                    if (markers.temp) {
-                        markers.temp.setMap(null);
-                        delete markers.temp;
-                    }
-                    selectedLocation = null;
                 })
                 .catch((error) => {
                     console.error("投稿エラー: ", error);

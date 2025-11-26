@@ -187,7 +187,7 @@
                         const reportedTime = data.reportTimestamp ? new Date(data.reportTimestamp.toDate()).toLocaleString() : '不明';
 
                         const infoWindow = new google.maps.InfoWindow({
-                            content: `<h3>不審者情報</h3>
+                            content: `<h3>危険箇所情報</h3>
                                       <p><strong>日時: ${reportedTime}</strong></p> 
                                       <p>${data.description}</p>
                                       <p>投稿者: <strong>${data.username || '匿名'}</strong></p>`

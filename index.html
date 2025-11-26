@@ -5,290 +5,447 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>水戸市不審者情報共有マップ</title>
     <style>
-        #map { height: 600px; width: 100%; }
-        .container { max-width: 800px; margin: 20px auto; font-family: Arial, sans-serif; }
+        /* 地図のスタイル */
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            font-family: Arial, sans-serif;
+        }
+        /* フォームと認証エリアのスタイル */
         #report-form, #auth-modal, #auth-status {
             padding: 15px;
             border: 1px solid #ccc;
             border-radius: 5px;
             margin-bottom: 20px;
         }
-        #auth-modal { background-color: #f9f9f9; }
+        #auth-modal {
+            background-color: #f9f9f9;
+        }
     </style>
 </head>
 <body>
-<div class="container">
+    <div class="container">
+        
+     
 
-    <div id="auth-status">
-        <p id="user-display">ログインしていません。</p>
-        <button id="auth-button" onclick="showAuthModal()">新規登録 / ログイン</button>
-        <button id="signout-button" onclick="signOutUser()" style="display:none;">ログアウト</button>
+        <div id="auth-status">
+            <p id="user-display">ログインしていません。</p>
+            <button id="auth-button" onclick="showAuthModal()">新規登録 / ログイン</button>
+            <button id="signout-button" onclick="signOutUser()" style="display:none;">ログアウト</button>
+        </div>
+
+        <div id="auth-modal" style="display:none;">
+            <h3>新規登録 / ログイン</h3>
+            <p>※投稿にはメール認証が必須です。</p>
+            <label for="auth-username">ユーザー名 (新規登録時必須):</label><br>
+            <input type="text" id="auth-username" placeholder="ユーザー名" style="margin-bottom: 10px; width: 90%;"><br>
+
+            <label for="auth-email">メールアドレス:</label><br>
+            <input type="email" id="auth-email" placeholder="メールアドレス" style="margin-bottom: 10px; width: 90%;"><br>
+
+            <label for="auth-password">パスワード:</label><br>
+            <input type="password" id="auth-password" placeholder="パスワード (6文字以上)" style="margin-bottom: 20px; width: 90%;"><br>
+
+            <button onclick="signUp()">新規登録</button>
+            <button onclick="signIn()">ログイン</button>
+            <button onclick="document.getElementById('auth-modal').style.display='none'">閉じる</button>
+            <p id="auth-message" style="color: red; margin-top: 10px;"></p>
+        </div>
+
+        <div id="report-form" style="display:none;">
+           
+            
+            <label for="report-datetime">日時:</label><br>
+            <input type="datetime-local" id="report-datetime" style="margin-bottom: 10px; width: 90%;"><br>
+            
+            <label for="description">状況の詳細:</label><br>
+            <textarea id="description" rows="3" cols="50" style="width: 90%;"></textarea><br><br>
+
+            <button onclick="submitReport()">投稿する</button>
+        </div>
+
+        <div id="map"></div>
     </div>
 
-    <div id="auth-modal" style="display:none;">
-        <h3>新規登録 / ログイン</h3>
-        <p>※投稿にはメール認証が必須です。</p>
-        <label>ユーザー名:</label><br>
-        <input type="text" id="auth-username" style="margin-bottom: 10px; width: 90%;"><br>
-        <label>メールアドレス:</label><br>
-        <input type="email" id="auth-email" style="margin-bottom: 10px; width: 90%;"><br>
-        <label>パスワード:</label><br>
-        <input type="password" id="auth-password" style="margin-bottom: 20px; width: 90%;"><br>
-        <button onclick="signUp()">新規登録</button>
-        <button onclick="signIn()">ログイン</button>
-        <button onclick="document.getElementById('auth-modal').style.display='none'">閉じる</button>
-        <p id="auth-message" style="color:red; margin-top:10px;"></p>
-    </div>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script> 
 
-    <div id="report-form" style="display:none;">
-        <label>日時:</label><br>
-        <input type="datetime-local" id="report-datetime" style="width: 90%; margin-bottom:10px;"><br>
+    <script>
+        // ----------------------------------------------------
+        // 🚨 1. Firebase設定: ここをあなたの情報に置き換えてください
+        // ----------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyB_ft6Nsv511VwGh73Peljdkhvc4cT1PK8",
+            authDomain: "danger-e17d4.firebaseapp.com",
+            projectId: "danger-e17d4",
+            storageBucket: "danger-e17d4.firebasestorage.app",
+            messagingSenderId: "671800740218",
+            appId: "1:671800740218:web:a95e9750fbf79905ea2ec3"
+        };
 
-        <label>状況の詳細:</label><br>
-        <textarea id="description" rows="3" style="width: 90%;"></textarea><br><br>
+        // Firebaseの初期化と参照の取得
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore(); 
+        const auth = firebase.auth(); 
+        const usersCollection = db.collection("users"); 
 
-        <button onclick="submitReport()">投稿する</button>
-    </div>
+        const markers = {}; 
+        const reportsData = {}; 
+        let currentUser = null; 
 
-    <div id="map"></div>
+        // ----------------------------------------------------
+        // 2. Google Maps APIキーの設定と読み込み
+        // ----------------------------------------------------
+        let map;
+        let selectedLocation = null; 
 
-</div>
+        /**
+         * Google Mapを初期化する関数
+         */
+        function initMap() {
+            const initialPos = { lat: 36.3658, lng: 140.4764 }; // 例: 水戸市
+            
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: initialPos,
+                zoom: 16,
+            });
 
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+            // 地図クリックイベントのリスナー設定 (投稿位置の選択)
+            map.addListener("click", (mapsMouseEvent) => {
+                // ログイン済みかつメール認証済みチェック (投稿を許可する条件)
+                if (!currentUser || !currentUser.emailVerified) {
+                    alert("ログインしてメール認証を完了しないと、投稿位置を選択できません。");
+                    return;
+                }
+                
+                const lat = mapsMouseEvent.latLng.lat();
+                const lng = mapsMouseEvent.latLng.lng();
+                
+                selectedLocation = { lat: lat, lng: lng };
+                
+                // フォームの入力欄をクリア
+                document.getElementById('report-datetime').value = '';
+                document.getElementById('description').value = ''; 
+                
+                // 以前の選択マーカーを削除
+                if (markers.temp) {
+                    markers.temp.setMap(null);
+                }
 
-<script>
-/* Firebase 設定 */
-const firebaseConfig = {
-    apiKey: "AIzaSyB_ft6Nsv511VwGh73Peljdkhvc4cT1PK8",
-    authDomain: "danger-e17d4.firebaseapp.com",
-    projectId: "danger-e17d4",
-    storageBucket: "danger-e17d4.firebasestorage.app",
-    messagingSenderId: "671800740218",
-    appId: "1:671800740218:web:a95e9750fbf79905ea2ec3"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
-const usersCollection = db.collection("users");
-
-let map;
-const markers = {};
-let selectedLocation = null;
-let currentUser = null;
-
-/* Google Maps 初期化 */
-function initMap() {
-    const pos = { lat: 36.3658, lng: 140.4764 };
-
-    map = new google.maps.Map(document.getElementById("map"), {
-        center: pos,
-        zoom: 16
-    });
-
-    map.addListener("click", (e) => {
-        if (!currentUser || !currentUser.emailVerified) {
-            alert("ログインしてメール認証を完了してください。");
-            return;
-        }
-
-        selectedLocation = { lat: e.latLng.lat(), lng: e.latLng.lng() };
-
-        if (markers.temp) {
-            markers.temp.setMap(null);
-            delete markers.temp;
-        }
-
-        addTempMarker(selectedLocation);
-    });
-
-    listenForReports();
-}
-
-/* temp マーカー追加（青ピン） */
-function addTempMarker(location) {
-    const marker = new google.maps.Marker({
-        position: location,
-        map: map,
-        icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-        title: "投稿位置"
-    });
-
-    markers.temp = marker;
-
-    let pressTimer;
-    const longPressTime = 800; // 長押し判定時間
-
-    const startPress = () => {
-        pressTimer = setTimeout(() => {
-            deleteTempMarker();
-        }, longPressTime);
-    };
-    const cancelPress = () => clearTimeout(pressTimer);
-
-    marker.addListener("mousedown", startPress);
-    marker.addListener("mouseup", cancelPress);
-    marker.addListener("touchstart", startPress);
-    marker.addListener("touchend", cancelPress);
-
-    marker.addListener("rightclick", deleteTempMarker);
-}
-
-/* tempマーカー削除 */
-function deleteTempMarker() {
-    if (window.confirm("青いピンを削除しますか？")) {
-        if (markers.temp) {
-            markers.temp.setMap(null);
-            delete markers.temp;
-        }
-        selectedLocation = null;
-        document.getElementById('report-datetime').value = "";
-        document.getElementById('description').value = "";
-        alert("青いピンを削除しました。");
-    }
-}
-
-/* Firestore リアルタイム更新 */
-function listenForReports() {
-    db.collection("reports").onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(change => {
-            const id = change.doc.id;
-            const data = change.doc.data();
-
-            if (change.type === "added") {
-                const marker = new google.maps.Marker({
-                    position: new google.maps.LatLng(data.latitude, data.longitude),
+                // 新しい選択マーカー (temp) を追加
+                markers.temp = new google.maps.Marker({
+                    position: selectedLocation,
                     map: map,
-                    icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                    title: "投稿位置",
+                    icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' // 青色ピン
+                });
+                
+                // 長押し(右クリック)で青いピンを削除する機能
+                markers.temp.addListener('rightclick', () => {
+                    if (window.confirm("この投稿位置の選択を解除（青いピンを削除）しますか？")) {
+                        markers.temp.setMap(null);
+                        delete markers.temp;
+                        selectedLocation = null;
+                        document.getElementById('report-datetime').value = '';
+                        document.getElementById('description').value = '';
+                        alert("投稿位置の選択を解除しました。");
+                    }
+                });
+            });
+
+            // データベースから既存のピンをリアルタイムで読み込む
+            listenForReports();
+        }
+
+        /**
+         * Firestoreから情報をリアルタイムで読み込む関数
+         */
+        function listenForReports() {
+            db.collection("reports").onSnapshot((snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const docId = change.doc.id;
+                    const data = change.doc.data();
+                    
+                    reportsData[docId] = data; 
+
+                    if (change.type === "added") {
+                        if (docId === 'temp') return; 
+                        
+                        const reportMarker = new google.maps.Marker({
+                            position: new google.maps.LatLng(data.latitude, data.longitude),
+                            map: map,
+                            title: data.description,
+                            icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png' // 赤いピン
+                        });
+                        
+                        // 報告日時(reportTimestamp)を取得 (ポップアップ表示修正済み)
+                        const reportedTime = data.reportTimestamp ? new Date(data.reportTimestamp.toDate()).toLocaleString() : '不明';
+
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `<h3>不審者情報</h3>
+                                      <p><strong>日時: ${reportedTime}</strong></p> 
+                                      <p>${data.description}</p>
+                                      <p>投稿者: <strong>${data.username || '匿名'}</strong></p>`
+                        });
+
+                        reportMarker.addListener("click", () => {
+                            infoWindow.open(map, reportMarker);
+                            
+                            // 既存のピンをクリックした際はフォームをリセット
+                            document.getElementById('report-datetime').value = ''; 
+                            document.getElementById('description').value = data.description; 
+                            
+                            if (markers.temp) {
+                                markers.temp.setMap(null);
+                                delete markers.temp;
+                            }
+                            selectedLocation = null;
+                        });
+
+                        markers[docId] = reportMarker;
+
+                    } else if (change.type === "removed") {
+                        if (markers[docId]) {
+                            markers[docId].setMap(null);
+                            delete markers[docId];
+                            delete reportsData[docId]; 
+                        }
+                    } 
+                });
+            });
+        }
+
+        // ----------------------------------------------------
+        // 3. 認証機能 (Auth)
+        // ----------------------------------------------------
+
+        /**
+         * 認証モーダルを表示する関数
+         */
+        function showAuthModal() {
+            document.getElementById('auth-modal').style.display = 'block';
+            document.getElementById('auth-message').innerText = ''; 
+            document.getElementById('auth-password').value = ''; 
+        }
+
+        /**
+         * ユーザー名、メールアドレス、パスワードで新規登録する関数 (リロード機能追加済み)
+         */
+        async function signUp() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const username = document.getElementById('auth-username').value;
+            const message = document.getElementById('auth-message');
+            message.innerText = '';
+
+            if (!email || !password || !username) {
+                message.innerText = 'メールアドレス、パスワード(6文字以上)、ユーザー名はすべて必須です。';
+                return;
+            }
+
+            try {
+                // 1. Firebase Authで新規ユーザーを作成
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                const user = userCredential.user;
+
+                // 2. ユーザー情報をFirestoreに保存（ユーザー名を保存）
+                await usersCollection.doc(user.uid).set({
+                    username: username,
+                    email: email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
 
-                const info = new google.maps.InfoWindow({
-                    content: `
-                        <h3>不審者情報</h3>
-                        <p><strong>日時:</strong> ${
-                            data.reportTimestamp ? new Date(data.reportTimestamp.toDate()).toLocaleString() : "不明"
-                        }</p>
-                        <p>${data.description}</p>
-                        <p>投稿者: <strong>${data.username || "匿名"}</strong></p>
-                    `
-                });
+                // 3. メール認証を送信
+                await user.sendEmailVerification();
+                
+                message.style.color = 'green';
+                message.innerText = `登録が完了しました。${email} に認証メールを送信しましたので、ご確認ください。ページをリロードします。`;
+                
+                document.getElementById('auth-password').value = '';
 
-                marker.addListener("click", () => info.open(map, marker));
-                markers[id] = marker;
+                // 登録成功後、3秒待ってからページをリロードする
+                setTimeout(() => {
+                    window.location.reload(); 
+                }, 3000); 
+
+            } catch (error) {
+                console.error("新規登録エラー: ", error);
+                message.style.color = 'red';
+                if (error.code === 'auth/weak-password') {
+                    message.innerText = 'パスワードは6文字以上で設定してください。';
+                } else if (error.code === 'auth/email-already-in-use') {
+                    message.innerText = 'このメールアドレスは既に使用されています。';
+                } else if (error.code === 'auth/invalid-email') {
+                    message.innerText = '有効なメールアドレスを入力してください。';
+                } else {
+                    message.innerText = `新規登録エラーが発生しました。`;
+                }
             }
-            if (change.type === "removed") {
-                markers[id]?.setMap(null);
-                delete markers[id];
+        }
+
+        /**
+         * ログインする関数 (新規登録直後でもログインできるように修正済み)
+         */
+        async function signIn() {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const message = document.getElementById('auth-message');
+            message.innerText = '';
+
+            if (!email || !password) {
+                message.innerText = 'メールアドレスとパスワードを入力してください。';
+                return;
+            }
+
+            try {
+                // ログイン成功。メール認証のチェックはonAuthStateChangedと投稿フォームで実施
+                await auth.signInWithEmailAndPassword(email, password);
+                
+                document.getElementById('auth-modal').style.display = 'none';
+                
+            } catch (error) {
+                console.error("ログインエラー: ", error);
+                message.style.color = 'red';
+                message.innerText = 'ログインに失敗しました。メールアドレスまたはパスワードが正しくありません。';
+            }
+        }
+
+        /**
+         * ログアウトする関数
+         */
+        function signOutUser() {
+            auth.signOut().then(() => {
+                alert("ログアウトしました。");
+            }).catch((error) => {
+                console.error("ログアウトエラー: ", error);
+            });
+        }
+
+        /**
+         * 認証状態の変化を監視し、UIを更新する関数
+         */
+        auth.onAuthStateChanged(async (user) => {
+            currentUser = user;
+            const userDisplay = document.getElementById('user-display');
+            const authButton = document.getElementById('auth-button');
+            const signoutButton = document.getElementById('signout-button');
+            const reportForm = document.getElementById('report-form');
+            
+            if (user) {
+                // ログイン済みの場合 (メール認証済みかどうかに関わらず)
+                authButton.style.display = 'none';
+                signoutButton.style.display = 'inline';
+
+                if (user.emailVerified) {
+                    // メール認証済みの場合
+                    reportForm.style.display = 'block';
+                    try {
+                        // ユーザー名をFirestoreから取得し、表示
+                        const userDoc = await usersCollection.doc(user.uid).get();
+                        const username = userDoc.exists ? userDoc.data().username : 'ユーザー名なし';
+                        userDisplay.innerHTML = `ようこそ、<strong>${username}</strong> さん。`;
+                    } catch (error) {
+                        console.error("ユーザー名取得エラー:", error);
+                        userDisplay.innerText = 'ログイン済み。';
+                    }
+                } else {
+                    // ログイン済みだがメール認証が未完了の場合
+                    reportForm.style.display = 'none'; // 投稿フォームは非表示のまま
+                    userDisplay.innerHTML = `ようこそ、<strong>${user.email}</strong> さん。⚠️投稿するにはメール認証を完了してから「ログアウト」をタップしてください。迷惑メールフォルダの確認もお願いします。`;
+                }
+            } else {
+                // 未ログインの場合
+                userDisplay.innerText = 'ログインしていません。投稿にはログインが必要です。';
+                authButton.style.display = 'inline';
+                signoutButton.style.display = 'none';
+                reportForm.style.display = 'none';
+                
+                // ログアウト時に一時ピンをリセット
+                if (markers.temp) {
+                    markers.temp.setMap(null);
+                    delete markers.temp;
+                }
+                selectedLocation = null;
             }
         });
-    });
-}
 
-/* 認証処理 */
-function showAuthModal() {
-    document.getElementById("auth-modal").style.display = "block";
-    document.getElementById("auth-message").innerText = "";
-}
+        // ----------------------------------------------------
+        // 4. 投稿機能
+        // ----------------------------------------------------
 
-async function signUp() {
-    const email = authEmail.value;
-    const password = authPassword.value;
-    const username = authUsername.value;
-    const msg = authMessage;
+        /**
+         * 投稿フォームのデータをFirestoreに送信する関数
+         */
+        function submitReport() {
+            // 認証チェック (メール認証が完了しているか再確認)
+            if (!currentUser || !currentUser.emailVerified) {
+                alert("投稿するには、メール認証を完了した状態でログインする必要があります。");
+                return;
+            }
 
-    if (!email || !password || !username) {
-        msg.innerText = "すべて入力してください。";
-        return;
-    }
+            const reportDatetimeInput = document.getElementById('report-datetime').value;
+            const description = document.getElementById('description').value;
 
-    try {
-        const cred = await auth.createUserWithEmailAndPassword(email, password);
-        await usersCollection.doc(cred.user.uid).set({ username, email });
-        await cred.user.sendEmailVerification();
-        msg.style.color = "green";
-        msg.innerText = "認証メールを送信しました。";
-    } catch (e) {
-        msg.innerText = "登録に失敗しました。";
-    }
-}
+            // バリデーションチェック
+            if (!selectedLocation) {
+                alert("地図をクリックしてピンの位置を選択してください。");
+                return;
+            }
+            if (!reportDatetimeInput) {
+                alert("日時を入力してください。");
+                return;
+            }
+            if (!description.trim()) {
+                alert("状況の詳細を入力してください。");
+                return;
+            }
 
-async function signIn() {
-    const email = authEmail.value;
-    const password = authPassword.value;
-    const msg = authMessage;
+            // 入力された日時をDateオブジェクトに変換
+            const reportDate = new Date(reportDatetimeInput);
 
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-        document.getElementById("auth-modal").style.display = "none";
-    } catch {
-        msg.innerText = "ログイン失敗";
-    }
-}
 
-function signOutUser() {
-    auth.signOut();
-}
+            // Firestoreからユーザー名を取得し、投稿データに含める
+            usersCollection.doc(currentUser.uid).get().then(userDoc => {
+                const username = userDoc.exists ? userDoc.data().username : '匿名ユーザー';
 
-auth.onAuthStateChanged(async (user) => {
-    currentUser = user;
-    const display = document.getElementById("user-display");
-    const form = document.getElementById("report-form");
+                const reportData = {
+                    latitude: selectedLocation.lat,
+                    longitude: selectedLocation.lng,
+                    description: description,
+                    username: username, // 投稿者名を保存
+                    reportTimestamp: firebase.firestore.Timestamp.fromDate(reportDate), // 報告日時 (入力日時)
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp() // サーバー側で投稿時間を記録
+                };
 
-    if (!user) {
-        display.innerText = "ログインしていません。";
-        form.style.display = "none";
-        return;
-    }
+                db.collection("reports").add(reportData)
+                    .then(() => {
+                        alert("情報を投稿しました。");
+                        
+                        // フォームと一時マーカーをリセット
+                        document.getElementById('report-datetime').value = '';
+                        document.getElementById('description').value = '';
+                        if (markers.temp) {
+                            markers.temp.setMap(null);
+                            delete markers.temp;
+                        }
+                        selectedLocation = null;
+                    })
+                    .catch((error) => {
+                        console.error("投稿エラー: ", error);
+                        alert("投稿中にエラーが発生しました。");
+                    });
+            }).catch(error => {
+                console.error("ユーザー名取得エラー:", error);
+                alert("ユーザー情報の取得に失敗しました。投稿を中止します。");
+            });
+        }
+    </script>
 
-    const doc = await usersCollection.doc(user.uid).get();
-    const name = doc.exists ? doc.data().username : "ユーザー";
-
-    if (user.emailVerified) {
-        display.innerHTML = `ようこそ <strong>${name}</strong> さん`;
-        form.style.display = "block";
-    } else {
-        display.innerHTML = `${user.email} さん。メール認証を済ませてください。`;
-        form.style.display = "none";
-    }
-});
-
-/* 投稿 */
-function submitReport() {
-    if (!selectedLocation) {
-        alert("青いピンを置いてください。");
-        return;
-    }
-
-    const datetime = reportDatetime.value;
-    const desc = description.value.trim();
-    if (!datetime || !desc) {
-        alert("すべて入力してください。");
-        return;
-    }
-
-    usersCollection.doc(currentUser.uid).get().then(doc => {
-        const username = doc.data().username;
-        db.collection("reports").add({
-            latitude: selectedLocation.lat,
-            longitude: selectedLocation.lng,
-            description: desc,
-            username,
-            reportTimestamp: firebase.firestore.Timestamp.fromDate(new Date(datetime)),
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        deleteTempMarker();
-        alert("投稿完了しました！");
-    });
-}
-</script>
-
-<!-- ⭐ Google Maps API (あなたのキーに置き換えてください) -->
-<script async defer
-src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC3WivvfQ9Y-qkXpjXwWXGGEXGKDOPhvMw&callback=initMap">
-</script>
-
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC3WivvfQ9Y-qkXpjXwWXGGEXGKDOPhvMw&callback=initMap"></script>
 </body>
 </html>
